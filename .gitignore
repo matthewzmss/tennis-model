@@ -1,0 +1,21 @@
+# Data: download yourself (Sackmann is CC BY-NC-SA; tennis-data.co.uk is private use only)
+tennis_data/
+*.xlsx
+*.xls
+recent_results.csv
+
+# Model outputs (state.pkl is ~130 MB, over GitHub's 100 MB limit)
+tennis_output/
+*.pkl
+
+# Personal notes
+CLAUDE.md
+.claude/
+
+# Python / OS
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/
+.DS_Store
+.vscode/
