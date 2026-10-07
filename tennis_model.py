@@ -319,35 +319,66 @@ def norm(txt):
     return " ".join(t.replace("-", " ").replace(".", " ").replace("'", " ").split())
 
 
+# tennis-data spellings no rule can match (e.g. a different first name), normalized
+NAME_ALIASES = {"barrios m": "tomas barrios vera"}
+
+
 class NameMap:
-    """Matches 'Ruud C.' (tennis-data) or 'Casper Ruud' to Sackmann player IDs."""
+    """Matches 'Ruud C.' / 'Cerundolo J.M.' (tennis-data) or 'Casper Ruud' to Sackmann IDs.
+
+    A short name is surname + initials. Its surname (spaces removed) is matched against
+    every run of tokens in each Sackmann name, and the given name must start with the
+    initials. Match tiers, best first: exact surname ('struff' in 'jan lennard struff'),
+    truncated surname ('mpetshi' in 'giovanni mpetshi perricard'), surname-first order
+    ('bu' in 'bu yunchaokete'). Ties go to the most recently active player."""
     def __init__(self, df):
-        self.full, self.short, self.latest = {}, defaultdict(set), {}
+        self.full, self.latest, self.runs = {}, {}, defaultdict(set)
+        seen = set()
         for side in ("winner", "loser"):
             sub = df[[f"{side}_id", f"{side}_name", "day"]].dropna()
             for pid, name, day in sub.itertuples(index=False):
-                self.full[norm(name)] = pid
-                toks = norm(name).split()
-                if len(toks) >= 2:
-                    for k in range(1, len(toks)):
-                        self.short[(" ".join(toks[k:]), toks[0][0])].add(pid)
                 if day > self.latest.get(pid, pd.Timestamp(0)):
                     self.latest[pid] = day
+                n = norm(name)
+                if (pid, n) in seen:
+                    continue
+                seen.add((pid, n))
+                self.full[n] = pid
+                toks = n.split()
+                for i in range(len(toks)):
+                    for j in range(i + 1, len(toks) + 1):
+                        if i > 0:
+                            given, tier = toks[0], 0 if j == len(toks) else 1
+                        elif j < len(toks):
+                            given, tier = toks[j], 2
+                        else:
+                            continue
+                        self.runs["".join(toks[i:j])].add((pid, given, tier))
         self.new_ids = {}
 
     def get(self, name):
         n = norm(name)
+        n = NAME_ALIASES.get(n, n)
         if n in self.full:
             return self.full[n]
+        raw = str(name).split()
+        k = len(raw)
+        while k > 1 and "." in raw[k - 1]:                   # trailing initials: 'J.M.', 'T. A.', 'Dar.'
+            k -= 1
         toks = n.split()
-        cands = set()
-        if len(toks) >= 2 and len(toks[-1]) <= 2:            # "ruud c" / "de minaur a"
-            initials = toks[-1]
-            cands = self.short.get((" ".join(toks[:-1]), initials[0]), set())
-        if len(cands) == 1:
-            return next(iter(cands))
-        if len(cands) > 1:                                   # pick most recently active
-            return max(cands, key=lambda p: self.latest.get(p, pd.Timestamp(0)))
+        if k < len(raw):
+            surname, initial = norm(" ".join(raw[:k])), norm(raw[k]).split()[0]
+        elif len(toks) >= 2 and len(toks[-1]) <= 2:          # 'ruud c' typed without dots
+            surname, initial = " ".join(toks[:-1]), toks[-1][0]
+        else:
+            surname = initial = None
+        if surname:
+            cands = [(t, p) for p, given, t in self.runs.get(surname.replace(" ", ""), ())
+                     if given.startswith(initial)]
+            if cands:
+                top = min(t for t, _ in cands)
+                pids = {p for t, p in cands if t == top}
+                return max(pids, key=lambda p: self.latest.get(p, pd.Timestamp(0)))
         if n not in self.new_ids:                            # unknown player: new ID
             self.new_ids[n] = f"new:{n}"
         return self.new_ids[n]
@@ -1399,6 +1430,22 @@ def cmd_predict(args):
     print(f"Sportsbook line ({args.vig:g}% vig): {na} {american(qa)}  |  {nb} {american(qb)}")
     pe = st.blended_elo_prob(a, b, args.surface)
     print(f"Plain Elo for comparison: {na} {pe:.1%}")
+    w = max(len(na), len(nb))
+
+    def row(label, va, vb):
+        print(f"  {label:<20}{na:<{w}} {va:>7}   |   {nb:<{w}} {vb:>7}")
+
+    rule = "=" * (46 + 2 * w)
+    print(f"\n{rule}")
+    print(f"  {na.upper()} vs {nb.upper()}")
+    print("  " + "  |  ".join(filter(None, [args.tourney, args.surface, f"Best of {args.best_of}",
+                                          str(day.date())])))
+    print("-" * len(rule))
+    print(f"  {'Prediction:':<20}{na if p >= 0.5 else nb}")
+    row("Win probability:", f"{p:.1%}", f"{1 - p:.1%}")
+    row("Fair line:", american(p), american(1 - p))
+    row("Sportsbook line:", american(qa), american(qb))
+    print(rule)
 
 
 def main():
