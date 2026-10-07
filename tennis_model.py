@@ -1178,6 +1178,18 @@ def american(p):
     return f"-{round(100 * p / (1 - p))}" if p >= 0.5 else f"+{round(100 * (1 - p) / p)}"
 
 
+def add_vig(p, vig):
+    """Fair probabilities -> sportsbook-style implied probabilities summing to 1 + vig.
+    Power method (q = p**k): the underdog carries more of the margin, like real books."""
+    p = min(max(p, 0.001), 0.999)
+    lo, hi = 0.5, 1.0
+    for _ in range(60):
+        k = (lo + hi) / 2
+        lo, hi = (lo, k) if p ** k + (1 - p) ** k < 1 + vig else (k, hi)
+    k = (lo + hi) / 2
+    return p ** k, (1 - p) ** k
+
+
 # ----------------------------------------------------------------------------
 # Commands
 # ----------------------------------------------------------------------------
@@ -1383,6 +1395,8 @@ def cmd_predict(args):
               + (f"  ({args.note})" if args.note else ""))
         print(f"Final scorecard: {abs(total):.1f} points toward {na if total >= 0 else nb}")
     print(f"Win probability: {na} {p:.1%} ({american(p)})  |  {nb} {1 - p:.1%} ({american(1 - p)})")
+    qa, qb = add_vig(p, args.vig / 100)
+    print(f"Sportsbook line ({args.vig:g}% vig): {na} {american(qa)}  |  {nb} {american(qb)}")
     pe = st.blended_elo_prob(a, b, args.surface)
     print(f"Plain Elo for comparison: {na} {pe:.1%}")
 
@@ -1417,6 +1431,8 @@ def main():
                    help="manual points for player A (injury, motivation, conditions...)")
     p.add_argument("--adjust-b", type=float, default=0.0, help="manual points for player B")
     p.add_argument("--note", default="", help="reason for the manual adjustment")
+    p.add_argument("--vig", type=float, default=5.0,
+                   help="bookmaker margin in %% for the sportsbook-style line (Pinnacle ~3, most books 5-8)")
     args = ap.parse_args()
     cmd_train(args) if args.cmd == "train" else cmd_predict(args)
 
