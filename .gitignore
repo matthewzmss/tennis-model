@@ -8,9 +8,10 @@ recent_results.csv
 tennis_output/
 *.pkl
 
-# Personal notes
+# Personal notes and private tools
 CLAUDE.md
 .claude/
+odds_backtest.py
 
 # Python / OS
 __pycache__/
